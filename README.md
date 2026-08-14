@@ -1,9 +1,22 @@
 # AgentOps — LLM Observability & Eval Dashboard
 
-Instruments your LLM agents with tracing (latency, tokens, cost per step),
-stores run history in SQLite, and surfaces it in a Streamlit dashboard —
-including automatic eval-regression flags when a prompt/model change drops
-quality below a threshold.
+[Live Dashboard](https://agentops-dashboard.streamlit.app/)
+
+Instruments LLM agents with tracing — latency, tokens, and cost per step —
+stores run history in Postgres (Supabase), and surfaces it in a Streamlit
+dashboard with automatic eval-regression flags when a prompt or model
+change drops quality below a rolling baseline.
+
+Currently instrumenting [AgentLoop](https://agentloop.streamlit.app/), a
+live multi-step research agent — every real run is traced end-to-end
+through this dashboard, not just synthetic example data.
+
+## Why build this instead of using Langfuse/Helicone/Arize
+
+Built to plug directly into eval harnesses I already maintain across my
+other agents, rather than adopt a general-purpose platform — the
+regression check compares against scores my own agents compute, not a
+generic metric.
 
 ## Structure
 
@@ -11,14 +24,14 @@ quality below a threshold.
 agentops/
 ├── tracer/
 │   ├── __init__.py
-│   ├── db.py           # SQLite schema + insert/query helpers
-│   └── trace.py        # @traced decorator — wrap any agent function/LLM call
+│   ├── db.py            # Postgres (Supabase) schema + insert/query helpers
+│   └── trace.py         # @traced decorator — wrap any agent function/LLM call
 ├── eval/
-│   └── regression.py   # compares latest eval score vs rolling baseline
+│   └── regression.py    # compares latest eval score vs rolling baseline
 ├── dashboard/
-│   └── app.py           # Streamlit dashboard (cost, latency, pass/fail trends)
+│   └── app.py            # Streamlit dashboard (cost, latency, pass/fail trends)
 ├── examples/
-│   └── example_agent.py # shows how to instrument a Groq call with @traced
+│   └── example_agent.py  # shows how to instrument a Groq call with @traced
 ├── requirements.txt
 └── .env.example
 ```
@@ -26,9 +39,10 @@ agentops/
 ## Quick start
 
 1. Create a free Supabase project (supabase.com) if you don't already have one.
-2. Go to Project Settings → Database → Connection info, and copy the host,
-   password, etc. into `.env` (see `.env.example`). Tables are created
-   automatically on first run — no manual SQL needed.
+2. From the project's **Connect** panel, grab the Transaction Pooler
+   connection string, and drop the host/port/db/user/password into `.env`
+   (see `.env.example`). Tables are created automatically on first run —
+   no manual SQL needed.
 
 ```bash
 python -m venv venv
@@ -39,48 +53,54 @@ python examples/example_agent.py   # generates a few sample traces
 streamlit run dashboard/app.py
 ```
 
-Data now persists in Postgres, so it survives Streamlit Cloud redeploys —
-unlike a local SQLite file, which resets whenever the app restarts.
+Data lives in Postgres, so it survives Streamlit Cloud redeploys — unlike
+a local file, which would reset whenever the app restarts.
 
 ### Deploying
 
 - Push this repo to GitHub, deploy `dashboard/app.py` on Streamlit Cloud.
-- In Streamlit Cloud's app settings → Secrets, paste the same key/value
-  pairs from your `.env` file (Streamlit reads `st.secrets`, but this repo
-  also works if you set them as regular environment variables via the
-  Streamlit Cloud "Secrets" TOML editor — they load through `os.environ`
-  the same way).
+- In the app's Settings → Secrets, paste the same key/value pairs from
+  `.env` in TOML format. The dashboard bridges `st.secrets` into
+  `os.environ` at startup, so no code changes are needed between local
+  and deployed runs.
 
-## How to instrument YOUR existing agents (SalesAgent, AgentLoop, etc.)
+## Instrumenting a real agent
 
-1. Copy `tracer/` into that project's repo (or `pip install -e` this as a local package later).
-2. Wrap any LLM call or tool call with the `@traced` decorator:
+This is how [AgentLoop](https://agentloop.streamlit.app/) is wired in —
+the same pattern applies to any LangGraph or plain-Python agent:
+
+1. Copy `tracer/` into the target project's repo.
+2. Wrap each LLM-calling function with `@traced`:
 
 ```python
-from tracer.trace import traced
+from tracer.trace import traced, set_run_context
 
-@traced(step_name="lead_research")
-def research_lead(linkedin_url: str) -> dict:
+@traced(step_name="research", model="llama-3.1-8b-instant")
+def research_node(state: AgentState) -> dict:
     ...
-    return result
+    return {**state, "input_tokens": ..., "output_tokens": ...}
 ```
 
-3. At the end of a full agent run, call `log_eval_score(run_id, score)` with
-   whatever eval metric you already compute (you have this logic in
-   SalesAgent and AskMyDocs already — just call it and pass the score in).
-4. Run the dashboard — it reads from `agentops.db` automatically.
+3. Call `set_run_context(agent_name="YourAgent")` once at the start of a run.
+4. At the end of a run, call `log_eval_score(run_id, agent_name, score)`
+   with whatever eval metric the agent already computes.
+5. Add the same Supabase credentials to that project's `.env` (and its
+   Streamlit Cloud Secrets, if deployed) so both write to the same database.
 
-## What this demonstrates on your resume
+## What this demonstrates
 
-- Cost/latency tracing across multi-step agent runs
-- Automatic regression detection: flags when a prompt/model change drops
-  eval scores below a rolling baseline — catches quality drops before deploy
-- A real ops dashboard, not just print statements
+- Cost and latency tracing across multi-step agent runs, on a live
+  production agent — not just a synthetic demo
+- Automatic regression detection: flags when a prompt or model change
+  drops eval scores below a rolling baseline, catching quality drops
+  before they'd otherwise go unnoticed
+- A real, deployed ops dashboard reading from a real Postgres database
 
-## Next steps to make it yours
+## Next steps
 
-- Swap the cost formula in `tracer/trace.py` for your actual Groq pricing tiers
-- Point it at 2 of your real agents instead of the example
-- Deploy the dashboard (Streamlit Cloud, same as your other projects)
-- Add a GIF of the dashboard to your portfolio README, same pattern as
-  AskMyDocs/SalesAgent
+- Instrument a second agent (SalesAgent or AskMyDocs) so the dashboard
+  compares cost/latency across multiple production systems
+- Swap the placeholder cost formula in `tracer/trace.py` for exact Groq
+  pricing tiers as they're confirmed
+- Replace the placeholder eval score in AgentLoop with a real metric
+  (e.g. report-quality LLM-as-judge)
