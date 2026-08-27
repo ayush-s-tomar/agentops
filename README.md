@@ -1,11 +1,19 @@
 # AgentOps — LLM Observability & Eval Dashboard
 
-[Live Dashboard](https://agentops-dashboard.streamlit.app/)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Streamlit](https://img.shields.io/badge/Streamlit-dashboard-FF4B4B?logo=streamlit&logoColor=white) ![Postgres](https://img.shields.io/badge/Supabase-Postgres-3ECF8E?logo=supabase&logoColor=white) ![Status](https://img.shields.io/badge/status-live-brightgreen)
+
+**[Live Dashboard →](https://agentops-dashboard.streamlit.app/)**
 
 Instruments LLM agents with tracing — latency, tokens, and cost per step —
 stores run history in Postgres (Supabase), and surfaces it in a Streamlit
 dashboard with automatic eval-regression flags when a prompt or model
 change drops quality below a rolling baseline.
+
+**TL;DR**
+- 📡 **Traces a real production agent, not a demo** — [AgentLoop](https://agentloop.streamlit.app/)'s live runs feed this dashboard end-to-end; every number on it comes from an actual multi-step research agent in use, not synthetic sample data.
+- 🚨 **Automatic regression detection** — flags when a prompt or model change drops an agent's own eval score below its rolling baseline, so quality drops surface on the dashboard instead of going unnoticed.
+- 🔌 **Drop-in instrumentation** — one `@traced` decorator wraps any LLM-calling function; works with LangGraph or plain-Python agents, not tied to one framework.
+- 🎯 **Built to plug into eval harnesses I already maintain**, not to replace them — see [Why build this instead of Langfuse/Helicone/Arize](#why-build-this-instead-of-using-langfusehelicionearize) below.
 
 Currently instrumenting [AgentLoop](https://agentloop.streamlit.app/), a
 live multi-step research agent — every real run is traced end-to-end
@@ -75,7 +83,7 @@ the same pattern applies to any LangGraph or plain-Python agent:
 ```python
 from tracer.trace import traced, set_run_context
 
-@traced(step_name="research", model="llama-3.1-8b-instant")
+@traced(step_name="research", model="openai/gpt-oss-20b")
 def research_node(state: AgentState) -> dict:
     ...
     return {**state, "input_tokens": ..., "output_tokens": ...}
@@ -96,6 +104,12 @@ def research_node(state: AgentState) -> dict:
   before they'd otherwise go unnoticed
 - A real, deployed ops dashboard reading from a real Postgres database
 
+## Known Limitations
+
+- **Cost formula is a placeholder** — `tracer/trace.py` currently estimates cost from token counts using approximate pricing, not the exact per-model Groq pricing tiers; numbers on the dashboard are directionally correct, not billing-accurate yet.
+- **Eval score being traced is itself a placeholder** in AgentLoop — the regression check is real and functional, but the quality signal it's watching isn't yet a robust report-quality metric (e.g., an LLM-as-judge score). The regression *mechanism* is proven; the metric it's protecting is the next thing to harden.
+- **Single agent instrumented so far** — only AgentLoop is wired in today, so cross-agent cost/latency comparison (the next milestone below) isn't available yet.
+
 ## Next steps
 
 - Instrument a second agent (SalesAgent or AskMyDocs) so the dashboard
@@ -104,3 +118,9 @@ def research_node(state: AgentState) -> dict:
   pricing tiers as they're confirmed
 - Replace the placeholder eval score in AgentLoop with a real metric
   (e.g. report-quality LLM-as-judge)
+
+## Author
+
+**Ayush Singh Tomar** — [GitHub](https://github.com/ayush-s-tomar)
+
+Part of my AI developer portfolio — infrastructure for the agents themselves, not just another agent. See also: [AgentLoop](https://github.com/ayush-s-tomar/agentloop), the research agent this dashboard traces in production.
